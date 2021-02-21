@@ -40,6 +40,7 @@ private:
 
 	int OpenFile(const char* filename);
 	AVFrame* AllocateFrame(AVPixelFormat pix_fmt, int width, int height);
+	double ComputeMSE(AVFrame* frame1, AVFrame* frame2);
 	int SaveFrame(AVFrame* pFrame, const char* filename);
 };
 

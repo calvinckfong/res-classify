@@ -61,7 +61,8 @@ void ResClassifier::Classify(const char* filename)
 		// Loop until end of file
 		int 		frameCnt=0;
 		AVPacket	packet;
-		int frameFinished, h;
+		int frameFinished;
+		double mse1, mse2;
 		while (av_read_frame(m_pFormatCtx, &packet)>=0)
 		{
 			if (packet.stream_index == m_videoStream)
@@ -74,27 +75,27 @@ void ResClassifier::Classify(const char* filename)
 					// Scale to 720p
 					sws_scale(m_sws_ctx_720p, (const uint8_t* const*)m_pFrame->data, m_pFrame->linesize,
 							0, m_pCodecCtx->height, (uint8_t* const*)m_pFrame720p->data, m_pFrame720p->linesize);
-					SaveFrame(m_pFrame720p, "720p.yuv");
+					//SaveFrame(m_pFrame720p, "720p.yuv");
 					// Scale to 1080p
 					sws_scale(m_sws_ctx_1080p1, (const uint8_t* const*)m_pFrame720p->data, m_pFrame720p->linesize,
 							0, m_pFrame720p->height, (uint8_t* const*)m_pFrame1080p1->data, m_pFrame1080p1->linesize);
-					SaveFrame(m_pFrame1080p1, "1080p1.yuv");
+					//SaveFrame(m_pFrame1080p1, "1080p1.yuv");
 					// Compute difference to original
+					mse1 = ComputeMSE(m_pFrame, m_pFrame1080p1);
 
 					// Scale to 480p
 					sws_scale(m_sws_ctx_480p, m_pFrame->data, m_pFrame->linesize,
 							0, m_pCodecCtx->height, m_pFrame480p->data, m_pFrame480p->linesize);
-					SaveFrame(m_pFrame480p, "480p.yuv");
+					//SaveFrame(m_pFrame480p, "480p.yuv");
 					// Scale to 1080p
 					sws_scale(m_sws_ctx_1080p2, m_pFrame480p->data, m_pFrame480p->linesize,
 							0, m_pFrame480p->height, m_pFrame1080p2->data, m_pFrame1080p2->linesize);
-					SaveFrame(m_pFrame1080p2, "1080p2.yuv");
+					//SaveFrame(m_pFrame1080p2, "1080p2.yuv");
 					// Compute difference to original
+					mse2 = ComputeMSE(m_pFrame, m_pFrame1080p2);
 
-					assert(false);
-#ifdef DEBUG
-					cout << "Frame " << frameCnt << endl;
-#endif
+					cout << "Frame " << frameCnt << " mse(720) " << mse1 << " mse(480) " << mse2 << endl;
+
 					frameCnt++;
 				}
 			}
@@ -223,6 +224,41 @@ AVFrame* ResClassifier::AllocateFrame(AVPixelFormat pix_fmt, int width, int heig
 	}
 
 	return picture;
+}
+
+double ResClassifier::ComputeMSE(AVFrame* frame1, AVFrame* frame2)
+{
+	// Todo: optimize using sse/avx or use avfilter
+
+	double diff, mse = 0.0;
+
+	assert(frame1->width==frame2->width && "Width not match");
+	assert(frame1->height==frame2->height && "Height not match");
+	assert(frame1->format==frame2->format && "Pixel format not match");
+
+	int width = frame1->width;
+	int height = frame1->height;
+	int linesize1 = frame1->linesize[0];
+	int linesize2 = frame2->linesize[0];
+	if (frame1->format == AV_PIX_FMT_YUV420P)
+	{
+		for (int i=0; i<height; i++)
+		{
+			for (int j=0; j<width; j++)
+			{
+				diff = (frame1->data[0] + i*linesize1)[j] - (frame2->data[0] + i*linesize2)[j];
+				mse += diff*diff;
+			}
+		}
+		mse = mse / (width*height);
+	}
+	else
+	{
+		cout << "ComputeMSE for this pixel foramt is not implemented yet" << endl;
+		assert(false);
+	}
+
+	return mse;
 }
 
 int ResClassifier::SaveFrame(AVFrame* pFrame, const char* filename)
