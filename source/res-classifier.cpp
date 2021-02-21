@@ -7,6 +7,16 @@
 
 #include "res-classifier.h"
 #include <iostream>
+#include <assert.h>
+
+extern "C" {
+#include "libavutil/channel_layout.h"
+#include "libavutil/mathematics.h"
+#include "libavutil/opt.h"
+#include "libavformat/avformat.h"
+//#include "libavresample/avresample.h"
+#include "libswscale/swscale.h"
+}
 
 using namespace std;
 
@@ -51,7 +61,7 @@ void ResClassifier::Classify(const char* filename)
 		// Loop until end of file
 		int 		frameCnt=0;
 		AVPacket	packet;
-		int frameFinished;
+		int frameFinished, h;
 		while (av_read_frame(m_pFormatCtx, &packet)>=0)
 		{
 			if (packet.stream_index == m_videoStream)
@@ -59,18 +69,29 @@ void ResClassifier::Classify(const char* filename)
 				avcodec_decode_video2(m_pCodecCtx, m_pFrame, &frameFinished, &packet);
 				if (frameFinished)
 				{
+					SaveFrame(m_pFrame, "origin.yuv");
+
 					// Scale to 720p
-					sws_scale(m_sws_ctx_720p, m_pFrame->data, m_pFrame->linesize, 0, m_pCodecCtx->height, m_pFrame720p->data, m_pFrame720p->linesize);
+					sws_scale(m_sws_ctx_720p, (const uint8_t* const*)m_pFrame->data, m_pFrame->linesize,
+							0, m_pCodecCtx->height, (uint8_t* const*)m_pFrame720p->data, m_pFrame720p->linesize);
+					SaveFrame(m_pFrame720p, "720p.yuv");
 					// Scale to 1080p
-					sws_scale(m_sws_ctx_1080p1, m_pFrame720p->data, m_pFrame720p->linesize, 0, m_pFrame720p->height, m_pFrame1080p1->data, m_pFrame1080p1->linesize);
+					sws_scale(m_sws_ctx_1080p1, (const uint8_t* const*)m_pFrame720p->data, m_pFrame720p->linesize,
+							0, m_pFrame720p->height, (uint8_t* const*)m_pFrame1080p1->data, m_pFrame1080p1->linesize);
+					SaveFrame(m_pFrame1080p1, "1080p1.yuv");
 					// Compute difference to original
 
 					// Scale to 480p
-					sws_scale(m_sws_ctx_480p, m_pFrame->data, m_pFrame->linesize, 0, m_pCodecCtx->height, m_pFrame480p->data, m_pFrame480p->linesize);
+					sws_scale(m_sws_ctx_480p, m_pFrame->data, m_pFrame->linesize,
+							0, m_pCodecCtx->height, m_pFrame480p->data, m_pFrame480p->linesize);
+					SaveFrame(m_pFrame480p, "480p.yuv");
 					// Scale to 1080p
-					sws_scale(m_sws_ctx_1080p2, m_pFrame480p->data, m_pFrame480p->linesize, 0, m_pFrame480p->height, m_pFrame1080p2->data, m_pFrame1080p2->linesize);
+					sws_scale(m_sws_ctx_1080p2, m_pFrame480p->data, m_pFrame480p->linesize,
+							0, m_pFrame480p->height, m_pFrame1080p2->data, m_pFrame1080p2->linesize);
+					SaveFrame(m_pFrame1080p2, "1080p2.yuv");
 					// Compute difference to original
 
+					assert(false);
 #ifdef DEBUG
 					cout << "Frame " << frameCnt << endl;
 #endif
@@ -151,43 +172,97 @@ int ResClassifier::OpenFile(const char* filename)
 
 	// Create Frames
 	AVPixelFormat pix_fmt = m_pCodecCtx->pix_fmt;
-	int numBytes=0;
 
-	numBytes=avpicture_get_size(pix_fmt, 854, 480);
-	m_buffer480p = (uint8_t*)av_malloc(numBytes*sizeof(uint8_t));
-	avpicture_fill((AVPicture *)m_pFrame480p, m_buffer480p, pix_fmt, 854, 480);
-
-	numBytes=avpicture_get_size(pix_fmt, 1280, 720);
-	m_buffer720p = (uint8_t*)av_malloc(numBytes*sizeof(uint8_t));
-	avpicture_fill((AVPicture *)m_pFrame720p, m_buffer720p, pix_fmt, 1280, 720);
-
-	numBytes=avpicture_get_size(pix_fmt, 1920, 1080);
-	m_buffer1080p1 = (uint8_t*)av_malloc(numBytes*sizeof(uint8_t));
-	avpicture_fill((AVPicture *)m_pFrame1080p1, m_buffer1080p1, pix_fmt, 1920, 1080);
-
-	m_buffer1080p2 = (uint8_t*)av_malloc(numBytes*sizeof(uint8_t));
-	avpicture_fill((AVPicture *)m_pFrame1080p2, m_buffer1080p2, pix_fmt, 1920, 1080);
+	m_pFrame480p = AllocateFrame(pix_fmt, 854, 480);
+	m_pFrame720p = AllocateFrame(pix_fmt, 1280, 720);
+	m_pFrame1080p1 = AllocateFrame(pix_fmt, 1920, 1080);
+	m_pFrame1080p2 = AllocateFrame(pix_fmt, 1920, 1080);
 
 	// Create scaling contexts
-	m_sws_ctx_480p = sws_getContext(
-			m_pCodecCtx->width, m_pCodecCtx->height, m_pCodecCtx->pix_fmt,
-			854, 480, m_pCodecCtx->pix_fmt, SWS_BILINEAR,
-			NULL, NULL, NULL);
-
 	m_sws_ctx_720p = sws_getContext(
 			m_pCodecCtx->width, m_pCodecCtx->height, m_pCodecCtx->pix_fmt,
-			1280, 720, m_pCodecCtx->pix_fmt, SWS_BILINEAR,
+			1280, 720, m_pCodecCtx->pix_fmt, SWS_BICUBIC,
+			NULL, NULL, NULL);
+
+	m_sws_ctx_480p = sws_getContext(
+			m_pCodecCtx->width, m_pCodecCtx->height, m_pCodecCtx->pix_fmt,
+			854, 480, m_pCodecCtx->pix_fmt, SWS_BICUBIC,
 			NULL, NULL, NULL);
 
 	m_sws_ctx_1080p1 = sws_getContext(
-			854, 480, m_pCodecCtx->pix_fmt,
+			1280, 720, m_pCodecCtx->pix_fmt,
 			m_pCodecCtx->width, m_pCodecCtx->height, m_pCodecCtx->pix_fmt, SWS_BILINEAR,
 			NULL, NULL, NULL);
 
 	m_sws_ctx_1080p2 = sws_getContext(
-			1280, 720, m_pCodecCtx->pix_fmt,
+			854, 480, m_pCodecCtx->pix_fmt,
 			m_pCodecCtx->width, m_pCodecCtx->height, m_pCodecCtx->pix_fmt, SWS_BILINEAR,
 			NULL, NULL, NULL);
+
+	return 0;
+}
+
+AVFrame* ResClassifier::AllocateFrame(AVPixelFormat pix_fmt, int width, int height)
+{
+   AVFrame *picture;
+   int ret;
+
+   picture = av_frame_alloc();
+   if (!picture)
+	   return NULL;
+
+	picture->format = pix_fmt;
+	picture->width  = width;
+	picture->height = height;
+
+	/* allocate the buffers for the frame data */
+	ret = av_frame_get_buffer(picture, 32);
+	if (ret < 0) {
+		cerr << "Could not allocate frame data." << endl;
+		exit(1);
+	}
+
+	return picture;
+}
+
+int ResClassifier::SaveFrame(AVFrame* pFrame, const char* filename)
+{
+	FILE* fp = fopen(filename, "wb");
+	if (fp)
+	{
+		int yHeight = pFrame->height;
+		int uvHeight = pFrame->height/2;
+		int yWidth = pFrame->width;
+		int uvWidth = pFrame->width/2;
+		int yLinesize = pFrame->linesize[0];
+		int uvLinesize = pFrame->linesize[1];
+
+		//cout << "yHeight " << yHeight << " yWidth " << yWidth << endl;
+
+		// write Y
+		for (int y=0; y<yHeight; y++)
+		{
+			fwrite(pFrame->data[0]+y*yLinesize, 1, yWidth, fp);
+		}
+
+		// write U
+		for (int y=0; y<uvHeight; y++)
+		{
+			fwrite(pFrame->data[1]+y*uvLinesize, 1, uvWidth, fp);
+		}
+
+		// write V
+		for (int y=0; y<uvHeight; y++)
+		{
+			fwrite(pFrame->data[2]+y*uvLinesize, 1, uvWidth, fp);
+		}
+		fclose(fp);
+	}
+	else
+	{
+		cout << "Unable to save frame" << endl;
+		return -1;
+	}
 
 	return 0;
 }

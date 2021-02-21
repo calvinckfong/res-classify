@@ -12,6 +12,7 @@
 extern "C" {
 #include <libavformat/avformat.h>
 #include <libswscale/swscale.h>
+#include <libavutil/imgutils.h>
 }
 
 class ResClassifier
@@ -38,7 +39,8 @@ private:
 	int m_videoStream;
 
 	int OpenFile(const char* filename);
-
+	AVFrame* AllocateFrame(AVPixelFormat pix_fmt, int width, int height);
+	int SaveFrame(AVFrame* pFrame, const char* filename);
 };
 
 
