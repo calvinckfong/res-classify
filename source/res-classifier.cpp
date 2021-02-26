@@ -70,7 +70,7 @@ void ResClassifier::Classify(const char* filename)
 				avcodec_decode_video2(m_pCodecCtx, m_pFrame, &frameFinished, &packet);
 				if (frameFinished)
 				{
-					SaveFrame(m_pFrame, "origin.yuv");
+					//SaveFrame(m_pFrame, "origin.yuv");
 
 					// Scale to 720p
 					sws_scale(m_sws_ctx_720p, (const uint8_t* const*)m_pFrame->data, m_pFrame->linesize,
@@ -94,7 +94,7 @@ void ResClassifier::Classify(const char* filename)
 					// Compute difference to original
 					mse2 = ComputeMSE(m_pFrame, m_pFrame1080p2);
 
-					cout << "Frame " << frameCnt << " mse(720) " << mse1 << " mse(480) " << mse2 << endl;
+					cout << "Frame " << frameCnt << " mse(720) " << mse1 << " mse(480) " << mse2 << " ratio " << mse2/mse1 << endl;
 
 					frameCnt++;
 				}
