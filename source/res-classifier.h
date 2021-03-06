@@ -15,10 +15,15 @@ extern "C" {
 #include <libavutil/imgutils.h>
 }
 
+typedef enum ClassifyMethod_ {
+	MSE_Method,
+	HighPass_Method
+} ClassifyMethod;
+
 class ResClassifier
 {
 public:
-	ResClassifier();
+	ResClassifier(int method);
 	~ResClassifier();
 
 	void Classify(const char* filename);
@@ -37,10 +42,17 @@ private:
 	struct SwsContext *m_sws_ctx_1080p2;
 
 	int m_videoStream;
+	ClassifyMethod m_method;
 
 	int OpenFile(const char* filename);
 	AVFrame* AllocateFrame(AVPixelFormat pix_fmt, int width, int height);
+
+	void MseAndCompare(int frameCnt);
 	double ComputeMSE(AVFrame* frame1, AVFrame* frame2);
+
+	void HighPassAndCompare(int frameCnt);
+	void ComputeHighPass(AVFrame* frame, double* hp_res, double* hor_res, double* ver_res);
+
 	int SaveFrame(AVFrame* pFrame, const char* filename);
 };
 

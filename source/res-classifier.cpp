@@ -22,12 +22,12 @@ using namespace std;
 
 bool ResClassifier::initialized = false;
 
-ResClassifier::ResClassifier() :
+ResClassifier::ResClassifier(int method) :
 	m_pFormatCtx(NULL), m_pCodecCtx(NULL), m_pCodec(NULL),
 	m_buffer480p(NULL), m_buffer720p(NULL), m_buffer1080p1(NULL), m_buffer1080p2(NULL),
 	m_pFrame(NULL), m_pFrame480p(NULL), m_pFrame720p(NULL), m_pFrame1080p1(NULL), m_pFrame1080p2(NULL),
 	m_sws_ctx_480p(NULL), m_sws_ctx_720p(NULL), m_sws_ctx_1080p1(NULL), m_sws_ctx_1080p2(NULL),
-	m_videoStream(-1)
+	m_videoStream(-1), m_method((ClassifyMethod)method)
 {
 	if (!initialized)
 	{
@@ -72,30 +72,14 @@ void ResClassifier::Classify(const char* filename)
 				{
 					//SaveFrame(m_pFrame, "origin.yuv");
 
-					// Scale to 720p
-					sws_scale(m_sws_ctx_720p, (const uint8_t* const*)m_pFrame->data, m_pFrame->linesize,
-							0, m_pCodecCtx->height, (uint8_t* const*)m_pFrame720p->data, m_pFrame720p->linesize);
-					//SaveFrame(m_pFrame720p, "720p.yuv");
-					// Scale to 1080p
-					sws_scale(m_sws_ctx_1080p1, (const uint8_t* const*)m_pFrame720p->data, m_pFrame720p->linesize,
-							0, m_pFrame720p->height, (uint8_t* const*)m_pFrame1080p1->data, m_pFrame1080p1->linesize);
-					//SaveFrame(m_pFrame1080p1, "1080p1.yuv");
-					// Compute difference to original
-					mse1 = ComputeMSE(m_pFrame, m_pFrame1080p1);
-
-					// Scale to 480p
-					sws_scale(m_sws_ctx_480p, m_pFrame->data, m_pFrame->linesize,
-							0, m_pCodecCtx->height, m_pFrame480p->data, m_pFrame480p->linesize);
-					//SaveFrame(m_pFrame480p, "480p.yuv");
-					// Scale to 1080p
-					sws_scale(m_sws_ctx_1080p2, m_pFrame480p->data, m_pFrame480p->linesize,
-							0, m_pFrame480p->height, m_pFrame1080p2->data, m_pFrame1080p2->linesize);
-					//SaveFrame(m_pFrame1080p2, "1080p2.yuv");
-					// Compute difference to original
-					mse2 = ComputeMSE(m_pFrame, m_pFrame1080p2);
-
-					cout << "Frame " << frameCnt << " mse(720) " << mse1 << " mse(480) " << mse2 << " ratio " << mse2/mse1 << endl;
-
+					if (m_method == MSE_Method)
+					{
+						MseAndCompare(frameCnt);
+					}
+					else if (m_method == HighPass_Method)
+					{
+						HighPassAndCompare(frameCnt);
+					}
 					frameCnt++;
 				}
 			}
@@ -226,6 +210,35 @@ AVFrame* ResClassifier::AllocateFrame(AVPixelFormat pix_fmt, int width, int heig
 	return picture;
 }
 
+void ResClassifier::MseAndCompare(int frameCnt)
+{
+	double mse1, mse2;
+
+	// Scale to 720p
+	sws_scale(m_sws_ctx_720p, (const uint8_t* const*)m_pFrame->data, m_pFrame->linesize,
+			0, m_pCodecCtx->height, (uint8_t* const*)m_pFrame720p->data, m_pFrame720p->linesize);
+	//SaveFrame(m_pFrame720p, "720p.yuv");
+	// Scale to 1080p
+	sws_scale(m_sws_ctx_1080p1, (const uint8_t* const*)m_pFrame720p->data, m_pFrame720p->linesize,
+			0, m_pFrame720p->height, (uint8_t* const*)m_pFrame1080p1->data, m_pFrame1080p1->linesize);
+	//SaveFrame(m_pFrame1080p1, "1080p1.yuv");
+	// Compute difference to original
+	mse1 = ComputeMSE(m_pFrame, m_pFrame1080p1);
+
+	// Scale to 480p
+	sws_scale(m_sws_ctx_480p, m_pFrame->data, m_pFrame->linesize,
+			0, m_pCodecCtx->height, m_pFrame480p->data, m_pFrame480p->linesize);
+	//SaveFrame(m_pFrame480p, "480p.yuv");
+	// Scale to 1080p
+	sws_scale(m_sws_ctx_1080p2, m_pFrame480p->data, m_pFrame480p->linesize,
+			0, m_pFrame480p->height, m_pFrame1080p2->data, m_pFrame1080p2->linesize);
+	//SaveFrame(m_pFrame1080p2, "1080p2.yuv");
+	// Compute difference to original
+	mse2 = ComputeMSE(m_pFrame, m_pFrame1080p2);
+
+	cout << "Frame " << frameCnt << " mse(720) " << mse1 << " mse(480) " << mse2 << " ratio " << mse2/mse1 << endl;
+}
+
 double ResClassifier::ComputeMSE(AVFrame* frame1, AVFrame* frame2)
 {
 	// Todo: optimize using sse/avx or use avfilter
@@ -259,6 +272,93 @@ double ResClassifier::ComputeMSE(AVFrame* frame1, AVFrame* frame2)
 	}
 
 	return mse;
+}
+
+void ResClassifier::HighPassAndCompare(int frameCnt)
+{
+	double hp1=0.0, hor1=0.0, ver1=0.0;
+	double hp2=0.0, hor2=0.0, ver2=0.0;
+
+	// Scale to 720p
+	sws_scale(m_sws_ctx_720p, (const uint8_t* const*)m_pFrame->data, m_pFrame->linesize,
+			0, m_pCodecCtx->height, (uint8_t* const*)m_pFrame720p->data, m_pFrame720p->linesize);
+
+	// Scale to 1080p
+	sws_scale(m_sws_ctx_1080p1, (const uint8_t* const*)m_pFrame720p->data, m_pFrame720p->linesize,
+			0, m_pFrame720p->height, (uint8_t* const*)m_pFrame1080p1->data, m_pFrame1080p1->linesize);
+
+	ComputeHighPass(m_pFrame1080p1, &hp1, &hor1, &ver1);
+
+	// Scale to 480p
+	sws_scale(m_sws_ctx_480p, m_pFrame->data, m_pFrame->linesize,
+			0, m_pCodecCtx->height, m_pFrame480p->data, m_pFrame480p->linesize);
+
+	// Scale to 1080p
+	sws_scale(m_sws_ctx_1080p2, m_pFrame480p->data, m_pFrame480p->linesize,
+			0, m_pFrame480p->height, m_pFrame1080p2->data, m_pFrame1080p2->linesize);
+
+	ComputeHighPass(m_pFrame1080p2, &hp2, &hor2, &ver2);
+
+	cout << "Frame " << frameCnt << " highpass " << hp1 << " " << hp2
+			<< " hori " << hor1 << " " << hor2
+			<< " vert " << ver1 << " " << ver2
+			<< endl;
+}
+
+void ResClassifier::ComputeHighPass(AVFrame* frame, double *hp_res, double *hor_res, double *ver_res)
+{
+	int width = frame->width;
+	int height = frame->height;
+	int stride = frame->linesize[0];
+	int *hp_result = new int[height*stride];
+	memset(hp_result, 0, height*stride*sizeof(int));
+	uint8_t *data = frame->data[0];
+
+	for (int i=1; i<height-1; i++)
+	{
+		for (int j=1; j<width-1; j++)
+		{
+			hp_result[i*stride+j] = 8*data[i*stride+j];
+		}
+	}
+
+	double hp=0.0, hor=0.0, ver=0.0;
+	for (int i=1; i<height-1; i++)
+	{
+		for (int j=1; j<width-1; j++)
+		{
+			int h0=0, h1=0, h2=0;
+			int v0=0, v2=0;
+			h0 += data[(i-1)*stride+j-1];
+			h0 += data[(i-1)*stride+j];
+			h0 += data[(i-1)*stride+j+1];
+
+			h1 += data[i*stride+j-1];
+			h1 += data[i*stride+j+1];
+
+			h2 += data[(i+1)*stride+j-1];
+			h2 += data[(i+1)*stride+j];
+			h2 += data[(i+1)*stride+j+1];
+
+			v0 += data[(i-1)*stride+j-1];
+			v0 += data[i*stride+j-1];
+			v0 += data[(i+1)*stride+j-1];
+
+			v2 += data[(i-1)*stride+j+1];
+			v2 += data[i*stride+j+1];
+			v2 += data[(i+1)*stride+j+1];
+
+			hp += abs(hp_result[i*stride+j] - h0 - h1 - h2);
+			hor += abs(h0-h2);
+			ver += abs(v0-v2);
+		}
+	}
+	double cnt = (width-1)*(height-1);
+	*hp_res = hp / cnt;
+	*hor_res = hor / cnt;
+	*ver_res = ver / cnt;
+
+	delete hp_result;
 }
 
 int ResClassifier::SaveFrame(AVFrame* pFrame, const char* filename)
