@@ -23,8 +23,8 @@ using namespace std;
 bool ResClassifier::initialized = false;
 
 ResClassifier::ResClassifier(int method) :
-	m_pFormatCtx(NULL), m_pCodecCtx(NULL), m_pCodec(NULL),
-	m_buffer480p(NULL), m_buffer720p(NULL), m_buffer1080p1(NULL), m_buffer1080p2(NULL),
+	m_pFormatCtx(NULL), m_pCodecCtx(NULL), m_pCodec(NULL), m_ySize(0),
+	m_buffer480p(NULL), m_buffer720p(NULL), m_buffer1080p1(NULL), m_buffer1080p2(NULL), m_prevBuffer1(NULL), m_prevBuffer2(NULL),
 	m_pFrame(NULL), m_pFrame480p(NULL), m_pFrame720p(NULL), m_pFrame1080p1(NULL), m_pFrame1080p2(NULL),
 	m_sws_ctx_480p(NULL), m_sws_ctx_720p(NULL), m_sws_ctx_1080p1(NULL), m_sws_ctx_1080p2(NULL),
 	m_videoStream(-1), m_method((ClassifyMethod)method)
@@ -42,6 +42,9 @@ ResClassifier::~ResClassifier()
 	if (m_buffer720p)		av_free(m_buffer720p);
 	if (m_buffer1080p1)	av_free(m_buffer1080p1);
 	if (m_buffer1080p2)	av_free(m_buffer1080p2);
+
+	if (m_prevBuffer1)	av_free(m_prevBuffer1);
+	if (m_prevBuffer2)	av_free(m_prevBuffer2);
 
 	if (m_pFrame)			av_free(m_pFrame);
 	if (m_pFrame480p)		av_free(m_pFrame480p);
@@ -287,8 +290,6 @@ void ResClassifier::HighPassAndCompare(int frameCnt)
 	sws_scale(m_sws_ctx_1080p1, (const uint8_t* const*)m_pFrame720p->data, m_pFrame720p->linesize,
 			0, m_pFrame720p->height, (uint8_t* const*)m_pFrame1080p1->data, m_pFrame1080p1->linesize);
 
-	ComputeHighPass(m_pFrame1080p1, &hp1, &hor1, &ver1);
-
 	// Scale to 480p
 	sws_scale(m_sws_ctx_480p, m_pFrame->data, m_pFrame->linesize,
 			0, m_pCodecCtx->height, m_pFrame480p->data, m_pFrame480p->linesize);
@@ -297,15 +298,30 @@ void ResClassifier::HighPassAndCompare(int frameCnt)
 	sws_scale(m_sws_ctx_1080p2, m_pFrame480p->data, m_pFrame480p->linesize,
 			0, m_pFrame480p->height, m_pFrame1080p2->data, m_pFrame1080p2->linesize);
 
-	ComputeHighPass(m_pFrame1080p2, &hp2, &hor2, &ver2);
+	if (frameCnt == 0)
+	{
+		m_ySize = m_pFrame->height*m_pFrame->linesize[0];
+		m_prevBuffer1 = (uint8_t*)av_malloc(m_ySize);
+		m_prevBuffer2 = (uint8_t*)av_malloc(m_ySize);
+		memcpy(m_prevBuffer1, m_pFrame1080p1->data[0], m_ySize);
+		memcpy(m_prevBuffer2, m_pFrame1080p2->data[0], m_ySize);
+	}
+	else
+	{
+		ComputeHighPass(m_pFrame1080p1, m_prevBuffer1, &hp1, &hor1, &ver1);
+		ComputeHighPass(m_pFrame1080p2, m_prevBuffer2, &hp2, &hor2, &ver2);
 
-	cout << "Frame " << frameCnt << " highpass " << hp1 << " " << hp2
-			<< " hori " << hor1 << " " << hor2
-			<< " vert " << ver1 << " " << ver2
-			<< endl;
+		cout << "Frame " << frameCnt << " highpass " << hp1 << " " << hp2
+				<< " hori " << hor1 << " " << hor2
+				<< " vert " << ver1 << " " << ver2
+				<< endl;
+
+		memcpy(m_prevBuffer1, m_pFrame1080p1->data[0], m_ySize);
+		memcpy(m_prevBuffer2, m_pFrame1080p2->data[0], m_ySize);
+	}
 }
 
-void ResClassifier::ComputeHighPass(AVFrame* frame, double *hp_res, double *hor_res, double *ver_res)
+void ResClassifier::ComputeHighPass(AVFrame* frame, uint8_t* prevLuma, double *hp_res, double *hor_res, double *ver_res)
 {
 	int width = frame->width;
 	int height = frame->height;
@@ -318,45 +334,57 @@ void ResClassifier::ComputeHighPass(AVFrame* frame, double *hp_res, double *hor_
 	{
 		for (int j=1; j<width-1; j++)
 		{
-			hp_result[i*stride+j] = 8*data[i*stride+j];
+			hp_result[i*stride+j] = data[i*stride+j];// - prevLuma[i*stride+j];
 		}
 	}
 
-	double hp=0.0, hor=0.0, ver=0.0;
+	uint64_t hp=0, hor=0, ver=0;
 	for (int i=1; i<height-1; i++)
 	{
 		for (int j=1; j<width-1; j++)
 		{
+			int pos, diff;
 			int h0=0, h1=0, h2=0;
 			int v0=0, v2=0;
-			h0 += data[(i-1)*stride+j-1];
-			h0 += data[(i-1)*stride+j];
-			h0 += data[(i-1)*stride+j+1];
 
-			h1 += data[i*stride+j-1];
-			h1 += data[i*stride+j+1];
+			h0 += hp_result[(i-1)*stride+j-1];
+			h0 += hp_result[(i-1)*stride+j];
+			h0 += hp_result[(i-1)*stride+j+1];
 
-			h2 += data[(i+1)*stride+j-1];
-			h2 += data[(i+1)*stride+j];
-			h2 += data[(i+1)*stride+j+1];
+			h1 += hp_result[i*stride+j-1];
+			h1 += hp_result[i*stride+j+1];
 
-			v0 += data[(i-1)*stride+j-1];
-			v0 += data[i*stride+j-1];
-			v0 += data[(i+1)*stride+j-1];
+			h2 += hp_result[(i+1)*stride+j-1];
+			h2 += hp_result[(i+1)*stride+j];
+			h2 += hp_result[(i+1)*stride+j+1];
 
-			v2 += data[(i-1)*stride+j+1];
-			v2 += data[i*stride+j+1];
-			v2 += data[(i+1)*stride+j+1];
+			v0 += hp_result[(i-1)*stride+j-1];
+			v0 += hp_result[i*stride+j-1];
+			v0 += hp_result[(i+1)*stride+j-1];
 
+			v2 += hp_result[(i-1)*stride+j+1];
+			v2 += hp_result[i*stride+j+1];
+			v2 += hp_result[(i+1)*stride+j+1];
+
+			pos = 8*hp_result[i*stride+j];
+
+			/*
 			hp += abs(hp_result[i*stride+j] - h0 - h1 - h2);
 			hor += abs(h0-h2);
 			ver += abs(v0-v2);
+			*/
+			diff = pos - h0 - h1 - h2;
+			hp += diff*diff;
+			diff = h0-h2;
+			hor += diff*diff;
+			diff = v0-v2;
+			ver += diff*diff;
 		}
 	}
-	double cnt = (width-1)*(height-1);
-	*hp_res = hp / cnt;
-	*hor_res = hor / cnt;
-	*ver_res = ver / cnt;
+	//double cnt = (width-1)*(height-1);
+	*hp_res = (double)hp;// / cnt;
+	*hor_res = (double)hor;// / cnt;
+	*ver_res = (double)ver;// / cnt;
 
 	delete hp_result;
 }

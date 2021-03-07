@@ -34,7 +34,9 @@ private:
 	AVFormatContext *m_pFormatCtx;
 	AVCodecContext *m_pCodecCtx;
 	AVCodec *m_pCodec;
+	uint32_t	m_ySize;
 	uint8_t *m_buffer480p, *m_buffer720p, *m_buffer1080p1, *m_buffer1080p2;
+	uint8_t *m_prevBuffer1, *m_prevBuffer2;
 	AVFrame *m_pFrame, *m_pFrame480p, *m_pFrame720p, *m_pFrame1080p1, *m_pFrame1080p2;
 	struct SwsContext *m_sws_ctx_480p;
 	struct SwsContext *m_sws_ctx_720p;
@@ -51,7 +53,8 @@ private:
 	double ComputeMSE(AVFrame* frame1, AVFrame* frame2);
 
 	void HighPassAndCompare(int frameCnt);
-	void ComputeHighPass(AVFrame* frame, double* hp_res, double* hor_res, double* ver_res);
+
+	void ComputeHighPass(AVFrame* frame, uint8_t* prevLuma, double* hp_res, double* hor_res, double* ver_res);
 
 	int SaveFrame(AVFrame* pFrame, const char* filename);
 };
