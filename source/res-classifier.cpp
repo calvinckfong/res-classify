@@ -8,6 +8,7 @@
 #include "res-classifier.h"
 #include <iostream>
 #include <assert.h>
+#include <chrono>
 
 extern "C" {
 #include "libavutil/channel_layout.h"
@@ -66,6 +67,9 @@ void ResClassifier::Classify(const char* filename)
 		AVPacket	packet;
 		int frameFinished;
 		double mse1, mse2;
+
+		auto startTime = std::chrono::high_resolution_clock::now();
+
 		while (av_read_frame(m_pFormatCtx, &packet)>=0)
 		{
 			if (packet.stream_index == m_videoStream)
@@ -86,6 +90,12 @@ void ResClassifier::Classify(const char* filename)
 					frameCnt++;
 				}
 			}
+		}
+		auto endTime = std::chrono::high_resolution_clock::now();
+		if (frameCnt>0)
+		{
+			std::chrono::duration<double> elapsed = endTime - startTime;
+			cout << "Processing speed " << (double)frameCnt/elapsed.count() << " fps" << endl;
 		}
 		av_free_packet(&packet);
 	}
